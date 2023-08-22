@@ -1,0 +1,1 @@
+migrate -path migrations/users -database "postgres://postgres:Tylpa31@localhost/cataloguer_test?sslmode=disable" up

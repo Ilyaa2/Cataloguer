@@ -1,0 +1,13 @@
+Может быть такая проблема, что браузер не сохраняет куки, хотя в ответе они видны
+1) В fetch запросе со стороны js должно быть поле credentials: 'include',
+The credentials read-only property of the Request interface indicates whether the user agent should send or receive cookies from the other domain in the case of cross-origin requests.
+
+2) На сервере должны быть выставленны заголовки:
+w.Header().Add("Access-Control-Allow-Credentials", "true")
+
+заголовок выше не дает использовать * в качестве значения в заголовках.
+Поэтому в middleware должно быть конкретно указан клиентский (ие) адреса:
+s.Router.Use(handlers.CORS(handlers.AllowedOrigins([]string{"http://127.0.0.1:5500"})))
+
+*3) - может быть, куки должны быть httpOnly - означает, что клиент не может их ни читать, ни изменять.
+*4) - может быть, что нужно использовать только адреса 127.0.0.1 везде, а не localhost.
