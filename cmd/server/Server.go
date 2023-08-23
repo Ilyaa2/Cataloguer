@@ -29,11 +29,10 @@ import (
 //4) Многопоточность
 
 type Server struct {
-	Router           *mux.Router
 	Context          context.Context
 	Store            store.Store
 	Cache            cache.Cache
-	FunctionalServer http.Server
+	FunctionalServer *http.Server
 	//Config
 	//Auth
 }
@@ -48,26 +47,8 @@ const (
 
 // Config
 func (s *Server) Start() {
-	/*
-		http.Server{
-			Addr:              "",
-			Handler:           nil,
-			ReadTimeout:       0,
-			ReadHeaderTimeout: 0,
-			WriteTimeout:      0,
-		}
-
-	*/
-
-	s.ConfigureRoutes()
-	err := http.ListenAndServe("127.0.0.1:8080", s)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.Router.ServeHTTP(w, r)
+	s.FunctionalServer.Handler = s.ConfigureRoutes()
+	log.Fatal(s.FunctionalServer.ListenAndServe())
 }
 
 func New() *Server {
@@ -79,20 +60,27 @@ func New() *Server {
 		return nil
 	}
 	return &Server{
-		Router: mux.NewRouter(),
-		Store:  sqlStore,
-		Cache:  redisCache,
+		Store: sqlStore,
+		Cache: redisCache,
 		//Config:
+		FunctionalServer: &http.Server{
+			Addr:         "127.0.0.1:8080",
+			Handler:      nil,
+			ReadTimeout:  time.Hour * 10,
+			WriteTimeout: time.Hour * 10,
+		},
 	}
 }
 
-func (s *Server) ConfigureRoutes() {
-	s.Router.Use(handlers.CORS(handlers.AllowedOrigins([]string{"http://127.0.0.1:5500"}), handlers.AllowCredentials()))
-	s.Router.HandleFunc("/register", s.register).Methods("POST")
-	s.Router.HandleFunc("/login", s.logIn()).Methods("POST")
-	privateAccess := s.Router.PathPrefix("/account").Subrouter()
+func (s *Server) ConfigureRoutes() http.Handler {
+	router := mux.NewRouter()
+	router.Use(handlers.CORS(handlers.AllowedOrigins([]string{"http://127.0.0.1:5500"}), handlers.AllowCredentials()))
+	router.HandleFunc("/register", s.register).Methods("POST")
+	router.HandleFunc("/login", s.logIn()).Methods("POST")
+	privateAccess := router.PathPrefix("/account").Subrouter()
 	privateAccess.Use(s.auth)
 	privateAccess.HandleFunc("/message", uploading).Methods("POST")
+	return router
 }
 
 // middleware для проверки валидности session_id
@@ -104,23 +92,25 @@ func (s *Server) auth(next http.Handler) http.Handler {
 				a := s.Cache.Session()
 				a.DeleteValue(cookie.Value)
 			}
-			sendError(w, r, http.StatusForbidden, http.ErrNoCookie)
+			sendMessage(w, r, http.StatusForbidden, http.ErrNoCookie)
 			return
 		}
 
 		userID, err := s.Cache.Session().GetValue(cookie.Value)
 		if err != nil {
-			sendError(w, r, http.StatusForbidden, errors.New("You must be logged in"))
+			sendMessage(w, r, http.StatusForbidden, errors.New("You must be logged in"))
 			return
 		}
 		id, _ := strconv.Atoi(userID)
 		u, err := s.Store.User().FindByID(id)
 		if err != nil {
 			s.Cache.Session().DeleteValue(cookie.Value)
-			sendError(w, r, http.StatusForbidden, err)
+			sendMessage(w, r, http.StatusForbidden, err)
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKeyUser, u)))
+		//_ = u
+		//next.ServeHTTP(w, r)
 	})
 }
 
@@ -128,16 +118,17 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	u := &model.User{}
 	err := json.NewDecoder(r.Body).Decode(u)
 	if err != nil {
-		sendError(w, r, http.StatusBadRequest, err)
+		fmt.Println(err.Error())
+		sendMessage(w, r, http.StatusBadRequest, err)
 		return
 	}
 	if err = u.ValidateUserFields(); err != nil {
-		sendError(w, r, http.StatusBadRequest, err)
+		sendMessage(w, r, http.StatusBadRequest, err)
 		return
 	}
 	err = s.Store.User().SaveUser(u)
 	if err != nil {
-		sendError(w, r, http.StatusConflict, errors.New("User with this email already registered"))
+		sendMessage(w, r, http.StatusConflict, errors.New("User with this email already registered"))
 		return
 	}
 	s.createSession(w, r, u)
@@ -148,7 +139,7 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request, u *model.
 	sessionId := util.RandString(64)
 	err := s.Cache.Session().SetValue(sessionId, strconv.Itoa(u.ID), cookieExpiration)
 	if err != nil {
-		sendError(w, r, http.StatusInternalServerError, err)
+		sendMessage(w, r, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -166,62 +157,89 @@ func (s *Server) logIn() http.HandlerFunc {
 		Password string `json:"password"`
 	}
 
-	//отправлять что пользователь с такой почтой уже зарегистрирован.
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req request
 		err := json.NewDecoder(r.Body).Decode(&req)
 		if err != nil {
-			sendError(w, r, http.StatusBadRequest, err)
+			sendMessage(w, r, http.StatusBadRequest, err)
 			return
 		}
 		u, err := s.Store.User().FindByEmail(req.Email)
 		if err != nil {
-			sendError(w, r, http.StatusUnauthorized, errors.New("The user with this email doesn't exist"))
+			sendMessage(w, r, http.StatusUnauthorized, errors.New("The user with this email doesn't exist"))
 			return
 		}
 		if u.IsPasswordCorrect(req.Password) {
 			s.createSession(w, r, u)
 			return
 		}
-		sendError(w, r, http.StatusUnauthorized, errors.New("Wrong password or email"))
+		sendMessage(w, r, http.StatusUnauthorized, errors.New("Wrong password or email"))
 	}
 }
 
-func sendError(w http.ResponseWriter, r *http.Request, code int, err error) {
+func sendMessage(w http.ResponseWriter, r *http.Request, code int, err error) {
 	w.WriteHeader(code)
 	resp := map[string]string{"error": err.Error()}
 	json.NewEncoder(w).Encode(resp)
 }
 
+// https://freshman.tech/file-upload-golang/
+// прогресс бар на сервере.
 func uploading(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("File Upload Endpoint Hit")
+	time.Sleep(time.Second * 10)
+	err := r.ParseMultipartForm(1 << 20) // 0 - might help.
+	defer func() {
+		if err := r.MultipartForm.RemoveAll(); err != nil {
+			log.Printf("failed to free multipart form resources: %v", err)
+		}
+	}()
 
-	err := r.ParseMultipartForm(32 << 20) // upload of 32 MB files.
-	file, handler, err := r.FormFile("item")
+	formFile, handler, err := r.FormFile("item")
+
 	if err != nil {
-		sendError(w, r, http.StatusBadRequest, errors.New("Error Retrieving the File, There's no 'item' tag in formdata.\n"+err.Error()))
+		sendMessage(w, r, http.StatusBadRequest, errors.New("Error Retrieving the File, There's no 'item' tag in formdata.\n"+err.Error()))
 	}
-	defer file.Close()
 
 	tmp1 := handler.Header.Get("Content-Type")
 	name := tmp1[:strings.LastIndex(tmp1, "/")]
 
 	tmp2 := handler.Filename
 	tp := tmp2[strings.LastIndex(tmp2, ".")+1:]
-	tempFile, err := os.CreateTemp("data/user1", name+"*."+tp)
-	if err != nil {
-		fmt.Println(err)
-	}
-	defer tempFile.Close()
 
-	fileBytes, err := io.ReadAll(file)
+	dirName := "user" + getIDFromContext(r)
+	err = os.Mkdir("data/"+dirName, os.ModeDir)
+	if err != nil && !os.IsExist(err) {
+		sendMessage(w, r, http.StatusInternalServerError, err)
+		return
+	}
+
+	tempFile, err := os.CreateTemp("data/"+dirName, name+"*."+tp)
 	if err != nil {
 		fmt.Println(err)
+		sendMessage(w, r, http.StatusInternalServerError, err)
+		return
 	}
-	tempFile.Write(fileBytes)
-	fmt.Fprintf(w, "Successfully Uploaded File\n")
+
+	//_, err = io.CopyBuffer(tempFile, formFile, make([]byte, 1024*64))
+	_, err = io.Copy(tempFile, formFile)
+	tempFile.Close()
+	formFile.Close()
+	if err != nil {
+		fmt.Println(err)
+		sendMessage(w, r, http.StatusInternalServerError, err)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]string{"detailed_response": "Successfully Uploaded File\n"})
 }
 
+func getIDFromContext(r *http.Request) string {
+	u := r.Context().Value(ctxKeyUser).(*model.User)
+	return strconv.Itoa(u.ID)
+}
+
+/*
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 
 }
+*/
