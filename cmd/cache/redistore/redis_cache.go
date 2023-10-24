@@ -12,7 +12,7 @@ type RedisCache struct {
 }
 
 func New(url string) (*RedisCache, error) {
-	conn, err := redis.DialURL("redis://user:@localhost:6379/1")
+	conn, err := redis.DialURL(url)
 	if err != nil {
 		log.Fatal(err)
 		return nil, err

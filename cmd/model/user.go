@@ -1,6 +1,8 @@
 package model
 
 import (
+	validation "github.com/go-ozzo/ozzo-validation"
+	"github.com/go-ozzo/ozzo-validation/is"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -17,7 +19,7 @@ func (u *User) BeforeCreate() error {
 	if err != nil {
 		return err
 	}
-	u.Password = ""
+	u.RemovePassword()
 	u.HashedPassword = res
 	return nil
 }
@@ -39,8 +41,13 @@ func (u *User) IsPasswordCorrect(password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(u.HashedPassword), []byte(password)) == nil
 }
 
-// todo validateUserFields
 func (u *User) ValidateUserFields() error {
-	//должна быть проверка имени.
-	return nil
+	return validation.ValidateStruct(u,
+		validation.Field(&u.Email, validation.Required, is.Email),
+		validation.Field(&u.Password, validation.Required, validation.Length(4, 20)),
+		validation.Field(&u.Name, validation.Required, validation.Length(1, 40)))
+}
+
+func (u *User) IsPayloadFieldsEmpty() bool {
+	return u.Password == "" || u.Email == ""
 }

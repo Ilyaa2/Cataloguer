@@ -1,0 +1,7 @@
+{
+  "cacheUrl" : "redis://user:@localhost:6379/1",
+  "storeUrl" : "user=postgres password=Tylpa31 dbname=cataloguer_dev sslmode=disable",
+  "serverAddr" : "127.0.0.1:8080",
+  "basePath" : "C:\\Users\\User\\GolandProjects\\Cataloguer",
+  "baseUrl" : "/account/messages/"
+}

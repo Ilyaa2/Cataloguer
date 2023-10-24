@@ -1,6 +1,7 @@
 package redistore
 
 import (
+	"Cataloguer/cmd/custom_errors"
 	"errors"
 	"github.com/gomodule/redigo/redis"
 )
@@ -17,7 +18,7 @@ func (s *SessionRepository) GetValue(key string) (string, error) {
 	data, err := s.redisCache.conn.Do("GET", key)
 	item, err := redis.String(data, err)
 	if err == redis.ErrNil {
-		return "", errors.New("Record not found in redistore")
+		return "", errors.New(custom_errors.RecordNotFoundInCache)
 	} else if err != nil {
 		return "", err
 	}
@@ -35,7 +36,7 @@ func (s *SessionRepository) SetValue(key string, value string, ex int) error {
 	_, err = redis.String(reply, err)
 	//if result != "OK"
 	if err != nil {
-		return errors.New("Result not ok. Can't set value in redistore")
+		return errors.New(custom_errors.CantSetValueInCache)
 	}
 	return nil
 }

@@ -3,25 +3,24 @@ package sqlstore
 import (
 	"Cataloguer/cmd/store"
 	"database/sql"
-	"fmt"
 	_ "github.com/lib/pq"
-	"golang.org/x/text/encoding/charmap"
+	"log"
 )
 
 type Sqlstore struct {
-	//тут должны хранится подключение (может пул)
-	connection     *sql.DB
-	userRepository *UserRepository
+	connection        *sql.DB
+	userRepository    *UserRepository
+	messageRepository *MessageRepository
 }
 
 func New(url string) (*Sqlstore, error) {
-	db, err := sql.Open("postgres", "user=postgres password=Tylpa31 dbname=cataloguer_test sslmode=disable")
+	db, err := sql.Open("postgres", url)
 	if err != nil {
-		return nil, wrapErrorFromDB(err)
+		return nil, err
 	}
 	if err = db.Ping(); err != nil {
-		fmt.Print(wrapErrorFromDB(err))
-		return nil, wrapErrorFromDB(err)
+		log.Println(err)
+		return nil, err
 	}
 	return &Sqlstore{connection: db}, nil
 }
@@ -35,6 +34,16 @@ func (s *Sqlstore) User() store.UserRepository {
 	return s.userRepository
 }
 
+func (s *Sqlstore) Message() store.MessageRepository {
+	if s.messageRepository == nil {
+		s.messageRepository = &MessageRepository{
+			SqlStore: s,
+		}
+	}
+	return s.messageRepository
+}
+
+/*
 func wrapErrorFromDB(err error) error {
 	if err == nil {
 		return err
@@ -42,3 +51,5 @@ func wrapErrorFromDB(err error) error {
 	utf8Text, _ := charmap.Windows1251.NewDecoder().String(err.Error())
 	return fmt.Errorf(utf8Text)
 }
+
+*/

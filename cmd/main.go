@@ -2,11 +2,25 @@ package main
 
 import (
 	"Cataloguer/cmd/server"
-	"fmt"
+	"encoding/json"
+	"flag"
+	"log"
+	"os"
 )
 
 func main() {
-	serv := server.New()
+	var configPath string
+	flag.StringVar(&configPath, "config-path", "configs/config.json", "config file path in json format")
+	file, err := os.Open(configPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	config := server.Config{}
+	err = json.NewDecoder(file).Decode(&config)
+	if err != nil {
+		log.Fatal(err)
+	}
+	serv := server.New(config)
 	serv.Start()
-	fmt.Print("server started")
+	log.Println("server started")
 }
